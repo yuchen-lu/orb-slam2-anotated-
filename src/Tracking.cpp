@@ -166,7 +166,7 @@ Tracking::Tracking(System *pSys, ORBVocabulary* pVoc, FrameDrawer *pFrameDrawer,
     {
         // 深度相机disparity转化为depth时的因子
         mDepthMapFactor = fSettings["DepthMapFactor"];
-        if(mDepthMapFactor==0)
+        if(fabs(mDepthMapFactor)<1e-5)
             mDepthMapFactor=1;
         else
             mDepthMapFactor = 1.0f/mDepthMapFactor;
@@ -261,8 +261,8 @@ cv::Mat Tracking::GrabImageRGBD(const cv::Mat &imRGB,const cv::Mat &imD, const d
     }
 
     // 步骤2：将深度相机的disparity转为Depth
-    if(mDepthMapFactor!=1 || imDepth.type()!=CV_32F);
-    imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
+    if((fabs(mDepthMapFactor-1.0f)>1e-5) || imDepth.type()!=CV_32F)
+        imDepth.convertTo(imDepth,CV_32F,mDepthMapFactor);
 
     // 步骤3：构造Frame
     mCurrentFrame = Frame(mImGray,imDepth,timestamp,mpORBextractorLeft,mpORBVocabulary,mK,mDistCoef,mbf,mThDepth);
@@ -326,7 +326,7 @@ void Tracking::Track()
         mState = NOT_INITIALIZED;
     }
 
-    // mLastProcessedState存储了Tracking最新的状态，这个变量有点多余
+    // mLastProcessedState存储了Tracking最新的状态，用于FrameDrawer中的绘制
     mLastProcessedState=mState;
 
     // Get Map Mutex -> Map cannot be changed
@@ -401,7 +401,7 @@ void Tracking::Track()
         }
         else
         {
-            // Only Tracking: Local Mapping is deactivated
+            // Localization Mode: Local Mapping is deactivated
             // 只进行跟踪tracking，局部地图不工作
  
             // 步骤2.1：跟踪上一帧或者参考帧或者重定位
@@ -539,7 +539,7 @@ void Tracking::Track()
 
             mpMapDrawer->SetCurrentCameraPose(mCurrentFrame.mTcw);
 
-            // Clean temporal point matches
+            // Clean VO matches
             // 步骤2.4：清除UpdateLastFrame中为当前帧临时添加的MapPoints
             for(int i=0; i<mCurrentFrame.N; i++)
             {
@@ -566,7 +566,7 @@ void Tracking::Track()
             mlpTemporalPoints.clear();
 
             // Check if we need to insert a new keyframe
-            // 步骤2.6：检测并插入关键帧
+            // 步骤2.6：检测并插入关键帧，对于双目会产生新的MapPoints
             if(NeedNewKeyFrame())
                 CreateNewKeyFrame();
 
@@ -659,7 +659,7 @@ void Tracking::StereoInitialization()
             {
                 // 步骤4.1：通过反投影得到该特征点的3D坐标
                 cv::Mat x3D = mCurrentFrame.UnprojectStereo(i);
-                // 步骤4.2：将3D点构造为MapPoin
+                // 步骤4.2：将3D点构造为MapPoint
                 MapPoint* pNewMP = new MapPoint(x3D,pKFini,mpMap);
 
                 // 步骤4.3：为该MapPoint添加属性：
@@ -943,9 +943,10 @@ void Tracking::CreateInitialMapMonocular()
 }
 
 /**
- * @brief 替换上一帧中的某些MapPoints
+ * @brief 检查上一帧中的MapPoints是否被替换
  * 
- * Local Mapping 线程可能会修改上一帧的某些MapPoints
+ * Local Mapping线程可能会将关键帧中某些MapPoints进行替换，由于tracking中需要用到mLastFrame，这里检查并更新上一帧中被替换的MapPoints
+ * @see LocalMapping::SearchInNeighbors()
  */
 void Tracking::CheckReplacedInLastFrame()
 {
@@ -1042,7 +1043,8 @@ void Tracking::UpdateLastFrame()
     if(mnLastKeyFrameId==mLastFrame.mnId || mSensor==System::MONOCULAR)
         return;
 
-    // 步骤2：对于双目或rgbd摄像头，为上一帧生成新的MapPoints
+    // 步骤2：对于双目或rgbd摄像头，为上一帧临时生成新的MapPoints
+    // 注意这些MapPoints不加入到Map中，在tracking的最后会删除
     // 跟踪过程中需要将将上一帧的MapPoints投影到当前帧可以缩小匹配范围，加快当前帧与上一帧进行特征点匹配
 
     // Create "visual odometry" MapPoints
@@ -1267,7 +1269,7 @@ bool Tracking::TrackLocalMap()
  */
 bool Tracking::NeedNewKeyFrame()
 {
-    // 步骤0：如果用户在界面上选择重定位，那么将不插入关键帧
+    // 步骤1：如果用户在界面上选择重定位，那么将不插入关键帧
     // 由于插入关键帧过程中会生成MapPoint，因此用户选择重定位后地图上的点云和关键帧都不会再增加
     if(mbOnlyTracking)
         return false;
@@ -1290,8 +1292,8 @@ bool Tracking::NeedNewKeyFrame()
         return false;
 
     // Tracked MapPoints in the reference keyframe
-    // 步骤3：得到匹配上参考帧的MapPoints数量
-	// 在TrackLocalMap步骤中找到的匹配地图点最多的帧设置为参考关键帧
+    // 步骤3：得到参考关键帧跟踪到的MapPoints数量
+	// 在UpdateLocalKeyFrames函数中会将与当前关键帧共视程度最高的关键帧设定为当前帧的参考关键帧
     int nMinObs = 3;
     if(nKFs<=2)
         nMinObs=2;
@@ -1494,7 +1496,7 @@ void Tracking::CreateNewKeyFrame()
 void Tracking::SearchLocalPoints()
 {
     // Do not search map points already matched
-    // 步骤1：遍历在当前帧的mvpMapPoints，标记这些MapPoints不参与之后的搜索
+    // 步骤1：遍历当前帧的mvpMapPoints，标记这些MapPoints不参与之后的搜索
     // 因为当前的mvpMapPoints一定在当前帧的视野中
     for(vector<MapPoint*>::iterator vit=mCurrentFrame.mvpMapPoints.begin(), vend=mCurrentFrame.mvpMapPoints.end(); vit!=vend; vit++)
     {
@@ -1581,7 +1583,7 @@ void Tracking::UpdateLocalMap()
 /**
  * @brief 更新局部关键点，called by UpdateLocalMap()
  * 
- * 局部关键帧mvpLocalKeyFrames的MapPoints更新mvpLocalMapPoints
+ * 局部关键帧mvpLocalKeyFrames的MapPoints，更新mvpLocalMapPoints
  */
 void Tracking::UpdateLocalPoints()
 {

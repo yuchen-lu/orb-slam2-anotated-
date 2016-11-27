@@ -190,9 +190,9 @@ bool ORBmatcher::CheckDistEpipolarLine(const cv::KeyPoint &kp1,const cv::KeyPoin
 }
 
 /**
- * @brief 通过词包，对关键帧的特征点进行跟踪，该函数用于重定位
+ * @brief 通过词包，对关键帧的特征点进行跟踪
  * 
- × 通过bow对pKF和F中的特征点进行快速匹配（不属于同一node的特征点直接跳过匹配） \n
+ * 通过bow对pKF和F中的特征点进行快速匹配（不属于同一node的特征点直接跳过匹配） \n
  * 对属于同一node的特征点通过描述子距离进行匹配 \n
  * 根据匹配，用pKF中特征点对应的MapPoint更新F中特征点对应的MapPoints \n
  * 每个特征点都对应一个MapPoint，因此pKF中每个特征点的MapPoint也就是F中对应点的MapPoint \n
@@ -420,7 +420,7 @@ int ORBmatcher::SearchByProjection(KeyFrame* pKF, cv::Mat Scw, const vector<MapP
         if(PO.dot(Pn)<0.5*dist)
             continue;
 
-        int nPredictedLevel = pMP->PredictScale(dist,pKF->mfLogScaleFactor);
+        int nPredictedLevel = pMP->PredictScale(dist,pKF);
 
         // Search in a radius
         // 根据尺度确定搜索半径
@@ -949,7 +949,15 @@ int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2, cv::Mat F
     return nmatches;
 }
 
-// 将MapPoints投影到关键帧pKF中，并判断是否有重复的MapPoints
+/**
+ * @brief 将MapPoints投影到关键帧pKF中，并判断是否有重复的MapPoints
+ * 1.如果MapPoint能匹配关键帧的特征点，并且该点有对应的MapPoint，那么将两个MapPoint合并（选择观测数多的）
+ * 2.如果MapPoint能匹配关键帧的特征点，并且该点没有对应的MapPoint，那么为该点添加MapPoint
+ * @param  pKF         相邻关键帧
+ * @param  vpMapPoints 当前关键帧的MapPoints
+ * @param  th          搜索半径的因子
+ * @return             重复MapPoints的数量
+ */
 int ORBmatcher::Fuse(KeyFrame *pKF, const vector<MapPoint *> &vpMapPoints, const float th)
 {
     cv::Mat Rcw = pKF->GetRotation();
@@ -1013,9 +1021,7 @@ int ORBmatcher::Fuse(KeyFrame *pKF, const vector<MapPoint *> &vpMapPoints, const
         if(PO.dot(Pn)<0.5*dist3D)
             continue;
 
-        int nPredictedLevel = pMP->PredictScale(dist3D,pKF->mfLogScaleFactor);
-        if( nPredictedLevel>=pKF->mnScaleLevels ||nPredictedLevel<0)
-            continue;
+        int nPredictedLevel = pMP->PredictScale(dist3D,pKF);
 
         // Search in a radius
         const float radius = th*pKF->mvScaleFactors[nPredictedLevel];// 步骤2：根据MapPoint的深度确定尺度，从而确定搜索范围
@@ -1181,7 +1187,7 @@ int ORBmatcher::Fuse(KeyFrame *pKF, cv::Mat Scw, const vector<MapPoint *> &vpPoi
             continue;
 
         // Compute predicted scale level
-        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF->mfLogScaleFactor);
+        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF);
 
         // Search in a radius
         // 计算搜索范围
@@ -1335,7 +1341,7 @@ int ORBmatcher::SearchBySim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint*> &
 
         // Compute predicted octave
         // 预测该MapPoint对应的特征点在图像金字塔哪一层
-        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF2->mfLogScaleFactor);
+        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF2);
 
         // Search in a radius
         // 计算特征点搜索半径
@@ -1421,7 +1427,7 @@ int ORBmatcher::SearchBySim3(KeyFrame *pKF1, KeyFrame *pKF2, vector<MapPoint*> &
             continue;
 
         // Compute predicted octave
-        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF1->mfLogScaleFactor);
+        const int nPredictedLevel = pMP->PredictScale(dist3D,pKF1);
 
         // Search in a radius of 2.5*sigma(ScaleLevel)
         const float radius = th*pKF1->mvScaleFactors[nPredictedLevel];
@@ -1702,7 +1708,7 @@ int ORBmatcher::SearchByProjection(Frame &CurrentFrame, KeyFrame *pKF, const set
                 if(dist3D<minDistance || dist3D>maxDistance)
                     continue;
 
-                int nPredictedLevel = pMP->PredictScale(dist3D,CurrentFrame.mfLogScaleFactor);
+                int nPredictedLevel = pMP->PredictScale(dist3D,&CurrentFrame);
 
                 // Search in a window
                 const float radius = th*CurrentFrame.mvScaleFactors[nPredictedLevel];

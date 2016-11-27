@@ -234,11 +234,13 @@ void MapPoint::Replace(MapPoint* pMP)
 
         if(!pMP->IsInKeyFrame(pKF))
         {
-            pKF->ReplaceMapPointMatch(mit->second, pMP);// 让KeyFrame用pMP替换掉现有的MapPoint
+            pKF->ReplaceMapPointMatch(mit->second, pMP);// 让KeyFrame用pMP替换掉原来的MapPoint
             pMP->AddObservation(pKF,mit->second);// 让MapPoint替换掉对应的KeyFrame
         }
-        else// 这个地方不理解 （wubo???）
+        else
         {
+            // 产生冲突，即pKF中有两个特征点a,b（这两个特征点的描述子是近似相同的），这两个特征点对应两个MapPoint为this,pMP
+            // 然而在fuse的过程中pMP的观测更多，需要替换this，因此保留b与pMP的联系，去掉a与this的联系
             pKF->EraseMapPointMatch(mit->second);
         }
     }
@@ -476,18 +478,43 @@ float MapPoint::GetMaxDistanceInvariance()
 //           log(dmax/d)
 // m = ceil(------------)
 //            log(1.2)
-int MapPoint::PredictScale(const float &currentDist, const float &logScaleFactor)
+int MapPoint::PredictScale(const float &currentDist, KeyFrame* pKF)
 {
     float ratio;
     {
-        unique_lock<mutex> lock3(mMutexPos);
+        unique_lock<mutex> lock(mMutexPos);
         // mfMaxDistance = ref_dist*levelScaleFactor为参考帧考虑上尺度后的距离
         // ratio = mfMaxDistance/currentDist = ref_dist/cur_dist
         ratio = mfMaxDistance/currentDist;
     }
 
     // 同时取log线性化
-    return ceil(log(ratio)/logScaleFactor);
+    int nScale = ceil(log(ratio)/pKF->mfLogScaleFactor);
+    if(nScale<0)
+        nScale = 0;
+    else if(nScale>=pKF->mnScaleLevels)
+        nScale = pKF->mnScaleLevels-1;
+
+    return nScale;
 }
+
+int MapPoint::PredictScale(const float &currentDist, Frame* pF)
+{
+    float ratio;
+    {
+        unique_lock<mutex> lock(mMutexPos);
+        ratio = mfMaxDistance/currentDist;
+    }
+
+    int nScale = ceil(log(ratio)/pF->mfLogScaleFactor);
+    if(nScale<0)
+        nScale = 0;
+    else if(nScale>=pF->mnScaleLevels)
+        nScale = pF->mnScaleLevels-1;
+
+    return nScale;
+}
+
+
 
 } //namespace ORB_SLAM

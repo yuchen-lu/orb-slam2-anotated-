@@ -99,6 +99,8 @@ cv::Mat FrameDrawer::DrawFrame()
     {
         mnTracked=0;
         mnTrackedVO=0;
+
+        // Draw keypoints
         const float r = 5;
         for(int i=0;i<N;i++)
         {
@@ -115,14 +117,14 @@ cv::Mat FrameDrawer::DrawFrame()
                 // 步骤2.2：正常跟踪时，在画布im中标注特征点
                 if(vbMap[i])
                 {
-                    //通道顺序为bgr，地图中MapPoints用绿色圆点表示，并用绿色小方框圈住
+                    // 通道顺序为bgr，地图中MapPoints用绿色圆点表示，并用绿色小方框圈住
                     cv::rectangle(im,pt1,pt2,cv::Scalar(0,255,0));
                     cv::circle(im,vCurrentKeys[i].pt,2,cv::Scalar(0,255,0),-1);
                     mnTracked++;
                 }
                 else // This is match to a "visual odometry" MapPoint created in the last frame
                 {
-                    //通道顺序为bgr，仅当前帧能观测到的MapPoints用蓝色圆点表示，并用蓝色小方框圈住
+                    // 通道顺序为bgr，仅当前帧能观测到的MapPoints用蓝色圆点表示，并用蓝色小方框圈住
                     cv::rectangle(im,pt1,pt2,cv::Scalar(255,0,0));
                     cv::circle(im,vCurrentKeys[i].pt,2,cv::Scalar(255,0,0),-1);
                     mnTrackedVO++;
